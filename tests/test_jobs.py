@@ -39,7 +39,7 @@ class TestJobService:
         
         job.refresh_from_db()
         assert job.status == 'FETCHING_ENVELOPES'
-        assert job.current_stage == 'Starting extraction'
+        assert job.stage == 'Starting extraction'
         assert job.started_at is not None
     
     def test_cancel_job(self):
@@ -52,7 +52,7 @@ class TestJobService:
         
         result = JobService.cancel_job(job.job_id)
         
-        assert result is True
+        assert result.status == 'CANCELLED'
         job.refresh_from_db()
         assert job.status == 'CANCELLED'
     
@@ -62,11 +62,13 @@ class TestJobService:
         JobService.create_job('org-2', date(2024, 2, 1), date(2024, 2, 28))
         JobService.create_job('org-1', date(2024, 3, 1), date(2024, 3, 31))
         
-        all_jobs = JobService.list_jobs()
+        all_jobs, total = JobService.list_jobs()
         assert len(all_jobs) == 3
+        assert total == 3
         
-        org1_jobs = JobService.list_jobs(organization_id='org-1')
+        org1_jobs, org1_total = JobService.list_jobs(organization_id='org-1')
         assert len(org1_jobs) == 2
+        assert org1_total == 2
 
 
 @pytest.mark.django_db
@@ -83,14 +85,14 @@ class TestCheckpointService:
         
         checkpoint = CheckpointService.save_checkpoint(
             job.job_id,
-            'envelopes',
-            page_position={'start_position': 100},
+            'FETCHING_ENVELOPES',
+            page_position=100,
             records_processed=100
         )
         
         assert checkpoint.job_id == job.job_id
-        assert checkpoint.stage == 'envelopes'
-        assert checkpoint.page_position['start_position'] == 100
+        assert checkpoint.stage == 'FETCHING_ENVELOPES'
+        assert checkpoint.page_position == 100
     
     def test_get_latest_checkpoint(self):
         """Test retrieving latest checkpoint."""
@@ -100,11 +102,11 @@ class TestCheckpointService:
             date_to=date(2024, 1, 31)
         )
         
-        CheckpointService.save_checkpoint(job.job_id, 'envelopes', page_position={'start_position': 0})
-        CheckpointService.save_checkpoint(job.job_id, 'envelopes', page_position={'start_position': 100})
+        CheckpointService.save_checkpoint(job.job_id, 'FETCHING_ENVELOPES', page_position=0)
+        CheckpointService.save_checkpoint(job.job_id, 'FETCHING_ENVELOPES', page_position=100)
         
-        latest = CheckpointService.get_latest_checkpoint(job.job_id, 'envelopes')
-        assert latest.page_position['start_position'] == 100
+        latest = CheckpointService.get_latest_checkpoint(job.job_id)
+        assert latest.page_position == 100
     
     def test_resume_job(self):
         """Test resuming a failed job."""
@@ -116,11 +118,11 @@ class TestCheckpointService:
         
         # Simulate a failed job with checkpoint
         JobService.update_status(job.job_id, 'FAILED')
-        CheckpointService.save_checkpoint(job.job_id, 'envelopes', page_position={'start_position': 50})
+        CheckpointService.save_checkpoint(job.job_id, 'FETCHING_ENVELOPES', page_position=50)
         
-        success, checkpoint, message = CheckpointService.resume_job(job.job_id)
+        resumed_job, checkpoint = CheckpointService.resume_job(job.job_id)
         
-        assert success is True
         assert checkpoint is not None
+        assert resumed_job.status == 'FETCHING_ENVELOPES'
         job.refresh_from_db()
         assert job.status == 'FETCHING_ENVELOPES'

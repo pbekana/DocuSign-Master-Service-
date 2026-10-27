@@ -1,0 +1,237 @@
+================================================================================
+                 HMAC AUTHENTICATION CONFIGURATION SUMMARY
+================================================================================
+
+✅ CONFIGURATION COMPLETE
+
+Your .env file has been updated with generated HMAC secret keys.
+
+================================================================================
+YOUR SECRET KEYS (Keep these secure!)
+================================================================================
+
+COORDINATOR KEY (Write Operations):
+  HMAC_SECRET_KEY_CORE=1e6436677f139cad7d6d3b2654b1dcd7ad6f8252ea4d9b133fe86c8d13aa170b
+
+ENGINEER KEY (Read-Only):
+  HMAC_SECRET_KEY_ENGINEER=16483765f1ffc1afa945961505879d87d06395911237aa42ebba8ca61c538b41
+
+OTHER SETTINGS (Keep as-is):
+  HMAC_SIGNATURE_MAX_AGE=300
+  HMAC_CLIENT_CONFIG=coordinator,engineer
+
+================================================================================
+WHAT EACH VALUE MEANS
+================================================================================
+
+HMAC_SECRET_KEY_CORE
+  └─ Secret for COORDINATOR client
+     └─ Used to sign requests for write operations
+     └─ Can: Create jobs, cancel, delete, resume
+     └─ Generate: python -c "import secrets; print(secrets.token_hex(32))"
+
+HMAC_SECRET_KEY_ENGINEER
+  └─ Secret for ENGINEER client (read-only)
+     └─ Used to sign requests for inspection
+     └─ Can: View jobs, view logs, statistics
+     └─ Generate: python -c "import secrets; print(secrets.token_hex(32))"
+
+HMAC_SIGNATURE_MAX_AGE=300
+  └─ How old a signature can be (in seconds)
+     └─ 300 = 5 minutes (prevents replay attacks)
+     └─ Don't change unless you have a specific reason
+
+HMAC_CLIENT_CONFIG=coordinator,engineer
+  └─ Allowed client IDs that can authenticate
+     └─ Coordinator: Write permissions
+     └─ Engineer: Read-only permissions
+     └─ Don't change unless adding new client types
+
+================================================================================
+WHERE THESE COME FROM
+================================================================================
+
+COORDINATOR KEY:   Generated randomly (you have it in .env now)
+ENGINEER KEY:      Generated randomly (you have it in .env now)
+MAX_AGE:           You decide the policy (5 min is standard)
+CLIENT CONFIG:     Fixed by application design (don't change)
+
+NOT from DocuSign, NOT from external service, NOT from anywhere else
+→ GENERATED SECURELY IN YOUR PROJECT
+
+These are NOT obtained from:
+- DocuSign developer portal
+- Any external API
+- Any configuration service
+- Any third-party
+
+They are RANDOM VALUES generated for YOUR security.
+
+================================================================================
+HOW TO USE THESE KEYS
+================================================================================
+
+1. COORDINATOR SYSTEM (Creates/manages jobs)
+   
+   Must sign requests with COORDINATOR key:
+   
+   python -c "
+   import hashlib, hmac, time
+   secret = '1e6436677f139cad7d6d3b2654b1dcd7ad6f8252ea4d9b133fe86c8d13aa170b'
+   method = 'POST'
+   path = '/api/scan/start'
+   body = '{\"organization_id\":\"org-123\",\"date_from\":\"2024-01-01T00:00:00Z\",\"date_to\":\"2024-01-31T23:59:59Z\"}'
+   timestamp = str(int(time.time()))
+   nonce = 'unique-nonce-' + str(int(time.time() * 1000))
+   body_hash = hashlib.sha256(body.encode()).hexdigest()
+   canonical = f'{method}\n{path}\n{timestamp}\n{nonce}\n{body_hash}'
+   signature = hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+   print(f'Signature: {signature}')
+   print(f'Timestamp: {timestamp}')
+   print(f'Nonce: {nonce}')
+   "
+   
+   Then send with headers:
+   - X-DS-Signature: <computed-signature>
+   - X-DS-Timestamp: <timestamp>
+   - X-DS-Client-ID: coordinator
+   - X-DS-Nonce: <nonce>
+
+2. ENGINEER SYSTEM (Inspects/audits jobs)
+   
+   Must sign requests with ENGINEER key:
+   - Same process as above
+   - Use ENGINEER key instead
+   - X-DS-Client-ID: engineer
+   - Can only call GET endpoints (read-only)
+
+================================================================================
+SECURITY GUIDELINES
+================================================================================
+
+✅ DO:
+   ✓ Keep .env file PRIVATE
+   ✓ Never commit .env to Git
+   ✓ Store keys in environment variables
+   ✓ Use different keys for different roles
+   ✓ Regenerate keys if compromised
+   ✓ Rotate keys periodically
+   ✓ Use HTTPS in production
+
+❌ DON'T:
+   ✗ Hardcode secrets in code
+   ✗ Share keys via email/chat
+   ✗ Log or display secret values
+   ✗ Use weak/predictable keys
+   ✗ Use same key for multiple purposes
+   ✗ Use HTTP in production
+
+================================================================================
+FILES CREATED/UPDATED
+================================================================================
+
+✅ .env
+   └─ Updated with generated HMAC keys
+
+✅ HMAC_AUTHENTICATION_GUIDE.md
+   └─ Complete explanation of HMAC setup
+   └─ How to generate new keys
+   └─ Security best practices
+
+✅ generate_hmac_secrets.py
+   └─ Script to generate new secrets anytime
+   └─ Usage: python generate_hmac_secrets.py
+
+================================================================================
+QUICK TEST COMMANDS
+================================================================================
+
+# Test 1: Health check (no auth needed)
+curl http://localhost:8000/api/health
+
+# Test 2: List jobs with engineer key
+ENGINEER_SECRET="16483765f1ffc1afa945961505879d87d06395911237aa42ebba8ca61c538b41"
+TIMESTAMP=$(date +%s)
+NONCE="test-$TIMESTAMP"
+BODY_HASH=$(echo -n "" | sha256sum | awk '{print $1}')
+CANONICAL="GET\n/api/scan/list\n$TIMESTAMP\n$NONCE\n$BODY_HASH"
+SIGNATURE=$(echo -ne "$CANONICAL" | openssl dgst -sha256 -hmac "$ENGINEER_SECRET" | awk '{print $2}')
+curl -X GET http://localhost:8000/api/scan/list \
+  -H "X-DS-Signature: $SIGNATURE" \
+  -H "X-DS-Timestamp: $TIMESTAMP" \
+  -H "X-DS-Client-ID: engineer" \
+  -H "X-DS-Nonce: $NONCE"
+
+# Test 3: Create job with coordinator key
+COORDINATOR_SECRET="1e6436677f139cad7d6d3b2654b1dcd7ad6f8252ea4d9b133fe86c8d13aa170b"
+TIMESTAMP=$(date +%s)
+NONCE="test-$TIMESTAMP"
+BODY='{"organization_id":"test-org","date_from":"2024-01-01T00:00:00Z","date_to":"2024-01-31T23:59:59Z"}'
+BODY_HASH=$(echo -n "$BODY" | sha256sum | awk '{print $1}')
+CANONICAL="POST\n/api/scan/start\n$TIMESTAMP\n$NONCE\n$BODY_HASH"
+SIGNATURE=$(echo -ne "$CANONICAL" | openssl dgst -sha256 -hmac "$COORDINATOR_SECRET" | awk '{print $2}')
+curl -X POST http://localhost:8000/api/scan/start \
+  -H "Content-Type: application/json" \
+  -H "X-DS-Signature: $SIGNATURE" \
+  -H "X-DS-Timestamp: $TIMESTAMP" \
+  -H "X-DS-Client-ID: coordinator" \
+  -H "X-DS-Nonce: $NONCE" \
+  -d "$BODY"
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. Start Django server:
+   python manage.py runserver
+
+2. Test using commands above
+
+3. Integrate with your coordinator system
+
+4. Monitor with audit logs:
+   curl http://localhost:8000/api/audit/logs
+
+5. For production:
+   - Set DEBUG=False
+   - Use real SECRET_KEY
+   - Configure ALLOWED_HOSTS
+   - Use HTTPS
+   - Update HMAC keys for production
+
+================================================================================
+DOCUMENTATION
+================================================================================
+
+See these files for more information:
+
+- HMAC_AUTHENTICATION_GUIDE.md
+  └─ Complete guide to HMAC authentication
+  └─ How to generate secrets
+  └─ Security best practices
+
+- generate_hmac_secrets.py
+  └─ Script to generate new secrets anytime
+  └─ Usage: python generate_hmac_secrets.py
+
+- README.md
+  └─ API documentation
+  └─ Setup instructions
+
+- DESIGN.md
+  └─ Architecture details
+  └─ Security implementation
+
+================================================================================
+✅ YOUR HMAC AUTHENTICATION IS READY!
+================================================================================
+
+Location: /home/simon/Downloads/DocuSign Master Service/.env
+
+Keys are:
+  - Securely generated (256-bit random)
+  - Properly separated (different keys for different roles)
+  - Configured in Django
+  - Ready to use
+
+You can now authenticate requests to your API! 🔐
