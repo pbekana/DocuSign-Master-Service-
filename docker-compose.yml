@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: docusign_postgres
+    environment:
+      POSTGRES_USER: docusign_user
+      POSTGRES_PASSWORD: docusign_password
+      POSTGRES_DB: docusign_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docusign_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: docusign_minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  django-app:
+    build: .
+    container_name: docusign_django
+    environment:
+      DEBUG: "False"
+      APP_ENV: production
+      SECRET_KEY: django-insecure-docker-change-me
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: postgresql://docusign_user:docusign_password@postgres:5432/docusign_db
+      DOCUSIGN_INTEGRATION_KEY: ${DOCUSIGN_INTEGRATION_KEY}
+      DOCUSIGN_USER_ID: ${DOCUSIGN_USER_ID}
+      DOCUSIGN_PRIVATE_KEY_PATH: ${DOCUSIGN_PRIVATE_KEY_PATH}
+      DOCUSIGN_AUTH_SERVER: ${DOCUSIGN_AUTH_SERVER}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: docusign
+      MINIO_SECURE: "False"
+      HMAC_ENABLED: "True"
+      HMAC_SECRET_KEY_CORE: ${HMAC_SECRET_KEY_CORE}
+      HMAC_SECRET_KEY_ENGINEER: ${HMAC_SECRET_KEY_ENGINEER}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: sh -c "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
+
+  worker:
+    build: .
+    container_name: docusign_worker
+    environment:
+      DEBUG: "False"
+      APP_ENV: production
+      DATABASE_URL: postgresql://docusign_user:docusign_password@postgres:5432/docusign_db
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: docusign
+      DOCUSIGN_AUTH_SERVER: ${DOCUSIGN_AUTH_SERVER}
+    depends_on:
+      - postgres
+      - minio
+    volumes:
+      - .:/app
+    command: python manage.py run_scan_worker
+    restart: on-failure
+
+volumes:
+  postgres_data:
+  minio_data:
